@@ -309,7 +309,10 @@ bot.on("callback_query", async (query) => {
 
 async function handleStartVerificationCallback(query) {
     const userId = query.from.id;
+    console.log(`[Verification Start] User ID: ${userId} - Callback received`); // Enhanced Logging
+
     if (verifiedUsers[userId]) {
+        console.log(`[Verification Start] User ID: ${userId} - Already verified`); // Enhanced Logging
         bot.sendMessage(userId, "✅ أنت بالفعل مستخدم موثق.");
         return;
     }
@@ -318,9 +321,12 @@ async function handleStartVerificationCallback(query) {
     verificationSessions[userId] = { question: verificationQuestion };
 
     try {
+        console.log(`[Verification Start] User ID: ${userId} - Attempting to send DM`); // Enhanced Logging
         await bot.sendMessage(userId, `📝 **سؤال التحقق:**\n${verificationQuestion}\n\n💡 **أرسل إجابتك الآن.**`, { parse_mode: "Markdown" });
+        console.log(`[Verification Start] User ID: ${userId} - DM sent successfully`); // Enhanced Logging
     } catch (error) {
-        console.error("❌ خطأ في إرسال سؤال التحقق إلى المستخدم:", error);
+        console.error(`[Verification Start] User ID: ${userId} - Error sending DM:`, error); // Enhanced Logging - Includes Error Details
+        console.error("⚠️ Full error details:", error); // Print the full error object for maximum information
         bot.sendMessage(userId, "❌ فشل بدء عملية التحقق. يرجى المحاولة لاحقًا.");
     }
 }
