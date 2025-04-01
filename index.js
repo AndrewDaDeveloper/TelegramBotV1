@@ -169,7 +169,7 @@ const commandHandlers = {
         const verificationText = "📢 هل ترغب في التقدم للتحقق؟ اضغط على الزر أدناه لبدء العملية.";
         const verificationKeyboard = {
             reply_markup: {
-                inline_keyboard: [[{ text: "📝 التقدم للتحقق", callback_data: "start_verification" }]]
+                inline_keyboard: [[{ text: "📝 التقدم للتحقق", callback_data: "start_verification_process" }]]
             }
         };
 
@@ -192,8 +192,11 @@ const commandHandlers = {
                         console.log(`✅ تم إرسال رسالة تحقق جديدة إلى القناة ${PUBLIC_CHANNEL_ID} (الرسالة السابقة غير موجودة)`);
                         bot.sendMessage(userId, "✅ تم إرسال رسالة التحقق بنجاح!");
                     } else {
-                        // Log other edit errors for debugging
+                        // Log other edit errors for debugging, especially for 403
                         console.error("❌ خطأ أثناء تحديث رسالة التحقق:", editError);
+                        if (editError.response && editError.response.statusCode === 403) {
+                            console.error("🚨 محتمل خطأ 403: ممنوع. تأكد من أن البوت لديه صلاحيات التعديل في القناة.");
+                        }
                         console.error("⚠️ تفاصيل الخطأ:", editError.response?.body || editError);
                         const message = await bot.sendMessage(PUBLIC_CHANNEL_ID, verificationText, verificationKeyboard);
                         lastVerificationMessage.messageId = message.message_id;
@@ -212,6 +215,9 @@ const commandHandlers = {
             }
         } catch (error) {
             console.error("❌ خطأ فادح في إرسال أو تحديث رسالة التحقق:", error);
+            if (error.response && error.response.statusCode === 403) {
+                console.error("🚨 محتمل خطأ 403: ممنوع. تأكد من أن البوت لديه صلاحيات الإرسال في القناة.");
+            }
             console.error("⚠️ تفاصيل الخطأ:", error);
             bot.sendMessage(userId, "❌ فشل فادح في إرسال/تحديث رسالة التحقق. تحقق من السجلات والأخطاء.");
         }
@@ -278,19 +284,23 @@ bot.on("message", async (msg) => {
 
 async function sendVerificationAnswerToAdmin(msg, userAnswer) {
     const userId = msg.from.id;
-    await bot.sendMessage(
-        ADMIN_ID,
-        `🔔 **طلب تحقق جديد!**\n👤 المستخدم: ${msg.from.first_name} (ID: ${userId})\n\n📝 **سؤال التحقق:**\n${verificationSessions[userId].question}\n\n✍️ **إجابة المستخدم:**\n${userAnswer}`,
-        {
-            parse_mode: "Markdown",
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: "✅ قبول", callback_data: `approve_${userId}` }],
-                    [{ text: "❌ رفض", callback_data: `reject_${userId}` }]
-                ]
+    try {
+        await bot.sendMessage(
+            ADMIN_ID,
+            `🔔 **طلب تحقق جديد!**\n👤 المستخدم: ${msg.from.first_name} (ID: ${userId})\n\n📝 **سؤال التحقق:**\n${verificationSessions[userId].question}\n\n✍️ **إجابة المستخدم:**\n${userAnswer}`,
+            {
+                parse_mode: "Markdown",
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: "✅ قبول", callback_data: `approve_${userId}` }],
+                        [{ text: "❌ رفض", callback_data: `reject_${userId}` }]
+                    ]
+                }
             }
-        }
-    );
+        );
+    } catch (error) {
+        console.error("❌ Error sending verification answer to admin:", error);
+    }
 }
 
 
@@ -299,7 +309,7 @@ bot.on("callback_query", async (query) => {
     const userId = query.from.id;
     const data = query.data;
 
-    if (data === "start_verification") {
+    if (data === "start_verification_process") {
         await handleStartVerificationCallback(query);
     } else if (data.startsWith("approve_") || data.startsWith("reject_")) {
         await handleApprovalRejectionCallback(query);
@@ -309,10 +319,7 @@ bot.on("callback_query", async (query) => {
 
 async function handleStartVerificationCallback(query) {
     const userId = query.from.id;
-    console.log(`[Verification Start] User ID: ${userId} - Callback received`); // Enhanced Logging
-
     if (verifiedUsers[userId]) {
-        console.log(`[Verification Start] User ID: ${userId} - Already verified`); // Enhanced Logging
         bot.sendMessage(userId, "✅ أنت بالفعل مستخدم موثق.");
         return;
     }
@@ -321,12 +328,9 @@ async function handleStartVerificationCallback(query) {
     verificationSessions[userId] = { question: verificationQuestion };
 
     try {
-        console.log(`[Verification Start] User ID: ${userId} - Attempting to send DM`); // Enhanced Logging
         await bot.sendMessage(userId, `📝 **سؤال التحقق:**\n${verificationQuestion}\n\n💡 **أرسل إجابتك الآن.**`, { parse_mode: "Markdown" });
-        console.log(`[Verification Start] User ID: ${userId} - DM sent successfully`); // Enhanced Logging
     } catch (error) {
-        console.error(`[Verification Start] User ID: ${userId} - Error sending DM:`, error); // Enhanced Logging - Includes Error Details
-        console.error("⚠️ Full error details:", error); // Print the full error object for maximum information
+        console.error("❌ خطأ في إرسال سؤال التحقق إلى المستخدم:", error);
         bot.sendMessage(userId, "❌ فشل بدء عملية التحقق. يرجى المحاولة لاحقًا.");
     }
 }
@@ -370,6 +374,9 @@ async function approveUserVerification(targetUserIdNum, query) {
                 await bot.sendMessage(targetUserIdNum, `🎉 تم أيضًا إضافتك إلى المجموعة الخاصة بالمستخدمين الموثوقين!`);
             } catch (joinError) {
                 console.error(`❌ Error adding user ${targetUserIdNum} to private group ${PRIVATE_GROUP_ID}:`, joinError);
+                if (joinError.response && joinError.response.statusCode === 403) {
+                    console.error("🚨 محتمل خطأ 403: ممنوع. تأكد من أن البوت لديه صلاحيات إضافة أعضاء في المجموعة الخاصة.");
+                }
                 await bot.sendMessage(targetUserIdNum, `⚠️ حدث خطأ أثناء إضافتك تلقائيًا إلى المجموعة الخاصة. يرجى الانضمام باستخدام هذا الرابط: ${PRIVATE_GROUP_INVITE_LINK}`);
                 await bot.sendMessage(ADMIN_ID, `⚠️ فشل إضافة المستخدم ${targetUserIdNum} إلى المجموعة الخاصة تلقائيًا. تم إرسال رابط الدعوة إلى المستخدم.`);
             }
